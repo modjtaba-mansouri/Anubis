@@ -1,0 +1,80 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'sw.js'
+      - 'manifest.webmanifest'
+      - 'firebase-config.js'
+      - 'icons/**'
+      - 'capacitor/**'
+      - '.github/workflows/build-android.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Capacitor Android dependencies
+        working-directory: capacitor
+        run: npm ci
+
+      - name: Sync web assets into the Android project
+        run: |
+          mkdir -p capacitor/android/app/src/main/assets/public/icons
+          cp index.html sw.js manifest.webmanifest firebase-config.js capacitor/android/app/src/main/assets/public/
+          cp icons/*.png capacitor/android/app/src/main/assets/public/icons/
+
+      - name: Compute version
+        id: ver
+        run: |
+          CODE=$((100 + ${{ github.run_number }}))
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "name=1.0.$CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed release APKs (split per ABI)
+        working-directory: capacitor/android
+        env:
+          ANUBIS_KEYSTORE_PATH: ../keystore/anubis-release.keystore
+          ANUBIS_KEYSTORE_PASSWORD: ${{ secrets.ANUBIS_KEYSTORE_PASSWORD }}
+          ANUBIS_KEY_ALIAS: ${{ secrets.ANUBIS_KEY_ALIAS }}
+          ANUBIS_KEY_PASSWORD: ${{ secrets.ANUBIS_KEY_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease \
+            -PappVersionCode=${{ steps.ver.outputs.code }} \
+            -PappVersionName=${{ steps.ver.outputs.name }}
+
+      - name: Locate built APK (arm64)
+        id: apks
+        run: |
+          find capacitor/android/app/build/outputs/apk/release -name "*.apk"
+          ARM64=$(find capacitor/android/app/build/outputs/apk/release -iname "*arm64-v8a*release*.apk" | head -1)
+          echo "arm64=$ARM64" >> "$GITHUB_OUTPUT"
+
+      - name: Rename APK for release
+        run: cp "${{ steps.apks.outputs.arm64 }}" "Anubis-${{ steps.ver.outputs.name }}.apk"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.name }}
+          name: Anubis v${{ steps.ver.outputs.name }}
+          files: Anubis-${{ steps.ver.outputs.name }}.apk
+          make_latest: true
