@@ -51,7 +51,7 @@ jobs:
       - name: Build signed release APKs (split per ABI)
         working-directory: capacitor/android
         env:
-          ANUBIS_KEYSTORE_PATH: ../keystore/anubis-release.keystore
+          ANUBIS_KEYSTORE_PATH: ../../keystore/anubis-release.keystore
           ANUBIS_KEYSTORE_PASSWORD: ${{ secrets.ANUBIS_KEYSTORE_PASSWORD }}
           ANUBIS_KEY_ALIAS: ${{ secrets.ANUBIS_KEY_ALIAS }}
           ANUBIS_KEY_PASSWORD: ${{ secrets.ANUBIS_KEY_PASSWORD }}
