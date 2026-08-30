@@ -44,9 +44,9 @@ jobs:
       - name: Compute version
         id: ver
         run: |
-          CODE=$((100 + ${{ github.run_number }}))
-          echo "code=$CODE" >> "$GITHUB_OUTPUT"
-          echo "name=1.0.$CODE" >> "$GITHUB_OUTPUT"
+          NAME=$(grep -oP "(?<=const APP_VERSION=')[^']+" index.html)
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
       - name: Build signed release APKs (split per ABI)
         working-directory: capacitor/android
