@@ -1,0 +1,9 @@
+{
+  "appId": "com.anubis",
+  "appName": "Anubis",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": false
+  }
+}
