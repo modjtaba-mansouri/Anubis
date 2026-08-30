@@ -1,0 +1,37 @@
+{
+  "name": "Anubis — The Viewer of the Truth Inside Humans",
+  "short_name": "Anubis",
+  "description": "A science-grounded people profiler & safety guide. Read people honestly before you trust them.",
+  "id": "./",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#050607",
+  "theme_color": "#0c0f10",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["productivity", "security", "social"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Add a person",
+      "short_name": "Add person",
+      "description": "Start profiling a new person",
+      "url": "./index.html#add",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Your profile",
+      "short_name": "Your profile",
+      "description": "Read your own profile",
+      "url": "./index.html#self",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

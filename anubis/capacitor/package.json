@@ -1,0 +1,13 @@
+{
+  "name": "anubis",
+  "version": "3.8.5",
+  "description": "Anubis — the viewer of the truth inside humans. People profiler & safety guide.",
+  "private": true,
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "appId": "com.anubis.profiler",
+  "appName": "Anubis",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#050607",
+    "allowMixedContent": false,
+    "captureInput": true
+  }
+}
