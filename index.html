@@ -276,10 +276,16 @@ footer.app-footer{flex-shrink:0;text-align:center;padding:16px 10px;font-size:10
         <div class="field"><label class="label">Gender</label><select id="a-gender"><option value="male">👨 Male</option><option value="female">👩 Female</option><option value="other">🧑 Other</option></select></div>
         <div class="field"><label class="label">Birth date</label><input type="date" id="a-dob"></div>
       </div>
+      <div style="text-align:center;margin:2px 0 4px"><a href="#" id="a-loginInsteadLink" style="color:var(--text-dim);font-size:12px;text-decoration:underline">Already have an account? Log in</a></div>
     </div>
     <div id="authLoginPick" class="hidden">
       <div class="label">Choose your account</div>
       <div class="acc-select" id="a-accList"></div>
+      <div style="text-align:center;margin-top:8px"><a href="#" id="a-cloudLoginLink" style="color:var(--text-dim);font-size:12px;text-decoration:underline">Log in to a different account</a></div>
+    </div>
+    <div id="authCloudLogin" class="hidden">
+      <p style="font-size:12px;color:var(--text-dim);line-height:1.5;margin:0 0 10px">Log in with your account name and password. If it's saved to the cloud, your profiles will be restored to this device.</p>
+      <div class="field"><label class="label">Account name</label><input type="text" id="a-cl-name" autocomplete="off" maxlength="40"></div>
     </div>
     <div class="field" id="a-consentWrap"><label class="label" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-weight:500"><input type="checkbox" id="a-consent" style="margin-top:2px;accent-color:var(--accent)"><span style="font-size:12px;line-height:1.5">I agree to the <b>Terms of Use</b> and <b>Privacy Policy</b> (in <code>PRIVACY.md</code>). Anubis stores my saved data in the cloud (Firebase) so I can sync across devices and anonymized stats help understand people.</span></label></div>
     <div class="field"><label class="label" id="a-pwLabel">Password</label><input type="password" id="a-pw" autocomplete="off"></div>
@@ -625,20 +631,67 @@ function fbRecord(cat, risk, confidence, relation){
     }).catch(function(){});
   }catch(e){}
 }
-/* Mirror a single saved person to Firestore (per-account doc) for device sync.
-   Uses a stable per-account doc id; content is scrubbed of answers/raw traits. */
+/* Mirror a single saved person to Firestore (full object, per-account) for device sync/restore. */
 function fbSyncPerson(p){
-  if(!FB.ready || !FB.db || !fbConsent() || !p || !p.profile) return;
+  if(!FB.ready || !FB.db || !fbConsent() || !CUR || !p) return;
   try{
-    const doc=FB.db.collection('anubis_people').doc(CUR.id+'_'+String(p.id)).set({
-      pid:p.id, name:p.name, relation:p.relation||'', relTier:p.relTier||'',
-      gender:p.gender||'', age:p.age||null, zodiac:(p.zodiac&&p.zodiac.name)||'',
-      category:p.profile.key, label:p.profile.label, risk:p.profile.risk,
-      confidence:p.profile.confidence, sci:p.profile.sci||[],
-      createdAt: (typeof p.createdAt==='number')? p.createdAt : 0,
-      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    FB.db.collection('anubis_people').doc(CUR.id+'_'+String(p.id)).set({
+      ownerId: CUR.id,
+      data: JSON.stringify(p),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }).catch(function(){});
   }catch(e){}
+}
+/* Mirror the self-profile to Firestore for device sync/restore. */
+function fbSyncSelf(p){
+  if(!FB.ready || !FB.db || !fbConsent() || !CUR || !p) return;
+  try{
+    FB.db.collection('anubis_self').doc(CUR.id).set({
+      ownerId: CUR.id,
+      data: JSON.stringify(p),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(function(){});
+  }catch(e){}
+}
+/* Save this account's credentials to the cloud so it can be logged into from another device. */
+async function fbSaveAccount(acc){
+  if(!FB.ready || !FB.db || !fbConsent()) return;
+  try{
+    await FB.db.collection('anubis_accounts').doc(acc.id).set({
+      name: acc.name, gender: acc.gender||'', dob: acc.dob||'', age: acc.age||null,
+      zodiacName: (acc.zodiac&&acc.zodiac.name)||'', zodiacRange: (acc.zodiac&&acc.zodiac.range)||'',
+      salt: acc.salt, hash: acc.hash, iter: acc.iter,
+      createdAt: acc.createdAt || new Date().toISOString()
+    });
+  }catch(e){ console.warn('Anubis: could not save account to cloud', e); }
+}
+/* Look up an account's credentials in the cloud by its stable id (for cross-device login). */
+async function fbFetchAccount(uid){
+  if(!FB.ready || !FB.db) return null;
+  try{
+    const doc=await FB.db.collection('anubis_accounts').doc(uid).get();
+    if(!doc.exists) return null;
+    return Object.assign({id:uid}, doc.data());
+  }catch(e){ console.warn('Anubis: cloud account lookup failed', e); return null; }
+}
+/* Pull all of this account's people + self-profile back down from the cloud (used right after a cloud login). */
+async function fbPullAllData(uid){
+  const result={people:[], self:null};
+  if(!FB.ready || !FB.db) return result;
+  try{
+    const snap=await FB.db.collection('anubis_people').where('ownerId','==',uid).get();
+    snap.forEach(function(d){ try{ const v=d.data(); if(v&&v.data) result.people.push(JSON.parse(v.data)); }catch(e){} });
+  }catch(e){ console.warn('Anubis: cloud people pull failed', e); }
+  try{
+    const sdoc=await FB.db.collection('anubis_self').doc(uid).get();
+    if(sdoc.exists){ const v=sdoc.data(); if(v&&v.data) result.self=JSON.parse(v.data); }
+  }catch(e){ console.warn('Anubis: cloud self pull failed', e); }
+  return result;
+}
+/* Turn a display name into a stable, deterministic account id (this is what makes cross-device login possible). */
+function usernameId(name){
+  const slug=(name||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+  return 'u-'+(slug || ('anon'+Date.now()));
 }
 
 /* ---------- Crypto (PBKDF2-SHA256) ---------- */
@@ -701,19 +754,28 @@ function showAuth(mode){
   const ov=document.getElementById('authOverlay'); ov.hidden=false;
   document.getElementById('appShell').classList.add('hidden');
   document.getElementById('authLogo').innerHTML=portalSVG(70);
-  const fr=document.getElementById('authFirstRun'), lk=document.getElementById('authLoginPick'), cw=document.getElementById('a-confirmWrap');
+  const fr=document.getElementById('authFirstRun'), lk=document.getElementById('authLoginPick'), cl=document.getElementById('authCloudLogin'), cw=document.getElementById('a-confirmWrap');
   const backWrap=document.getElementById('a-backWrap');
   const accts=loadAccounts();
+  fr.classList.add('hidden'); lk.classList.add('hidden'); cl.classList.add('hidden');
   if(mode==='first'){
-    fr.classList.remove('hidden'); lk.classList.add('hidden'); cw.classList.remove('hidden');
+    fr.classList.remove('hidden'); cw.classList.remove('hidden');
     document.getElementById('authTitle').textContent='Create your account';
     document.getElementById('a-pwLabel').textContent='Password';
     document.getElementById('a-submit').textContent='Create & enter';
     document.getElementById('a-err').textContent='';
     document.getElementById('a-name').value=''; document.getElementById('a-dob').value='';
     backWrap.classList.toggle('hidden', accts.length===0);
+  } else if(mode==='cloud'){
+    cl.classList.remove('hidden'); cw.classList.add('hidden');
+    document.getElementById('authTitle').textContent='Log in';
+    document.getElementById('a-pwLabel').textContent='Password';
+    document.getElementById('a-submit').textContent='Log in';
+    document.getElementById('a-err').textContent='';
+    document.getElementById('a-cl-name').value='';
+    backWrap.classList.remove('hidden');
   } else { // login
-    fr.classList.add('hidden'); lk.classList.remove('hidden'); cw.classList.add('hidden');
+    lk.classList.remove('hidden'); cw.classList.add('hidden');
     document.getElementById('authTitle').textContent='Anubis is locked';
     document.getElementById('a-pwLabel').textContent='Enter password';
     document.getElementById('a-submit').textContent='Unlock';
@@ -735,7 +797,29 @@ function renderAccList(){
 async function handleAuthSubmit(){
   const accts=loadAccounts(); const err=document.getElementById('a-err'); err.textContent='';
   const pw=document.getElementById('a-pw').value;
-  if(_authMode==='first' || !accts.length){
+  if(_authMode==='cloud'){
+    // log in with account name + password, restoring data from the cloud
+    const name=document.getElementById('a-cl-name').value.trim();
+    if(!name){ err.textContent='Enter your account name.'; return; }
+    if(!pw){ err.textContent='Enter your password.'; return; }
+    if(!FB.ready){ err.textContent="Cloud login isn't available right now (offline, or cloud sync isn't set up)."; return; }
+    const uid=usernameId(name);
+    const cloudAcc=await fbFetchAccount(uid);
+    if(!cloudAcc){ err.textContent='No account found with that name.'; return; }
+    const ok=await verifyCred(pw, cloudAcc);
+    if(!ok){ err.textContent='Incorrect password.'; return; }
+    const acc={ id:uid, name:cloudAcc.name, gender:cloudAcc.gender, dob:cloudAcc.dob,
+      age:cloudAcc.age, zodiac: cloudAcc.zodiacName?{name:cloudAcc.zodiacName,range:cloudAcc.zodiacRange}:null,
+      salt:cloudAcc.salt, hash:cloudAcc.hash, iter:cloudAcc.iter, createdAt:cloudAcc.createdAt };
+    const idx=accts.findIndex(a=>a.id===uid); if(idx>=0) accts[idx]=acc; else accts.push(acc);
+    saveAccounts(accts); localStorage.setItem(LS.last, uid); _selAccId=uid;
+    fbSetConsent(true);
+    CUR=acc; // so AKEY() resolves to this account while we write the pulled data below
+    const pulled=await fbPullAllData(uid);
+    saveJSON(AKEY('people'), pulled.people);
+    saveJSON(AKEY('self'), pulled.self);
+    await finishUnlock(acc);
+  } else if(_authMode==='first' || !accts.length){
     // create a new account: name, gender, dob, password
     const name=document.getElementById('a-name').value.trim();
     const gender=document.getElementById('a-gender').value||'male';
@@ -744,16 +828,22 @@ async function handleAuthSubmit(){
     if(!name){ err.textContent='Please enter your name.'; return; }
     const consent=document.getElementById('a-consent');
     if(consent && !consent.checked){ err.textContent='Please tick "I agree to the Terms & Privacy Policy" to continue.'; return; }
-    fbSetConsent(true);
     if(!pw||pw.length<4){ err.textContent='Password must be at least 4 characters.'; return; }
     if(pw!==pw2){ err.textContent='Passwords do not match.'; return; }
+    const uid=usernameId(name);
+    if(FB.ready){
+      const existing=await fbFetchAccount(uid);
+      if(existing){ err.textContent='An account with this name already exists in the cloud — log in instead.'; return; }
+    }
+    fbSetConsent(true);
     let age=null,zodiac=null; if(dob){ age=ageFrom(dob); const z=zodiacFrom(+dob.slice(5,7),+dob.slice(8,10)); zodiac={name:z.n,range:z.s+' – '+z.e}; }
     const cred=await createCred(pw);
-    const acc={ id:'u'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), name, gender, dob, age, zodiac, salt:cred.salt, hash:cred.hash, iter:cred.iter, createdAt:new Date().toISOString() };
+    const acc={ id:uid, name, gender, dob, age, zodiac, salt:cred.salt, hash:cred.hash, iter:cred.iter, createdAt:new Date().toISOString() };
     accts.push(acc); saveAccounts(accts); localStorage.setItem(LS.last, acc.id); _selAccId=acc.id;
+    await fbSaveAccount(acc);
     await finishUnlock(acc);
   } else {
-    // login
+    // login (local device already has this account cached)
     const acc=accts.find(a=>a.id===_selAccId)||accts[0]; if(!acc){ err.textContent='No account.'; return; }
     if(!pw){ err.textContent='Enter your password.'; return; }
     const ok=await verifyCred(pw, acc); if(!ok){ err.textContent='Incorrect password.'; return; }
@@ -799,8 +889,8 @@ function applyLockAfter(){
 /* ============================================================
    DATA SAVE (people / self / draft)
    ============================================================ */
-function savePeople(){ saveJSON(AKEY('people'), STATE.people); }
-function saveSelf(){ saveJSON(AKEY('self'), STATE.selfProfile); }
+function savePeople(){ saveJSON(AKEY('people'), STATE.people); STATE.people.forEach(fbSyncPerson); }
+function saveSelf(){ saveJSON(AKEY('self'), STATE.selfProfile); if(STATE.selfProfile) fbSyncSelf(STATE.selfProfile); }
 function saveDraft(){ if(STATE.person && !STATE.person.profile) saveJSON(AKEY('draft'), {person:STATE.person, qIndex:STATE.qIndex, selfMode:STATE.selfMode, deeper:!!STATE.deeper, complete:false}); }
 
 /* ============================================================
@@ -1142,7 +1232,6 @@ function buildReport(){
   const idx=STATE.people.findIndex(x=>x.id===p.id); if(idx>=0)STATE.people[idx]=p; else STATE.people.push(p);
   savePeople(); localStorage.removeItem(AKEY('draft')); STATE.draft=null;
   fbRecord(key, cat.risk, conf, p.relation);  // anonymized category-count analytics
-  fbSyncPerson(p);                            // cloud mirror (if Firebase enabled + consent)
   showView('report');
 }
 function renderReport(){ /* reopen a saved person -> full report */
@@ -1365,9 +1454,12 @@ document.getElementById('navSelf').addEventListener('click',openSelf);
 document.getElementById('navCompare').addEventListener('click',renderCompare);
 document.getElementById('navSettings').addEventListener('click',openSettings);
 document.getElementById('a-submit').addEventListener('click',()=>{ handleAuthSubmit().catch(e=>{ document.getElementById('a-err').textContent='Error: '+e.message; }); });
-document.getElementById('a-backLink').addEventListener('click',(e)=>{ e.preventDefault(); showAuth('login'); });
+document.getElementById('a-backLink').addEventListener('click',(e)=>{ e.preventDefault(); const a=loadAccounts(); showAuth(a.length?'login':'first'); });
+document.getElementById('a-loginInsteadLink').addEventListener('click',(e)=>{ e.preventDefault(); showAuth('cloud'); });
+document.getElementById('a-cloudLoginLink').addEventListener('click',(e)=>{ e.preventDefault(); showAuth('cloud'); });
 document.getElementById('a-pw').addEventListener('keydown',e=>{ if(e.key==='Enter')handleAuthSubmit().catch(()=>{}); });
 document.getElementById('a-pw2').addEventListener('keydown',e=>{ if(e.key==='Enter')handleAuthSubmit().catch(()=>{}); });
+document.getElementById('a-cl-name').addEventListener('keydown',e=>{ if(e.key==='Enter')handleAuthSubmit().catch(()=>{}); });
 
 // expose to global
 window.showView=showView; window.addNew=addNew; window.startAssessment=startAssessment; window.prevQuestion=prevQuestion;
@@ -1377,8 +1469,9 @@ window.resumeDraft=resumeDraft; window.discardDraft=discardDraft; window.clearAc
 window.continueAssessment=continueAssessment; window.redoEvaluation=redoEvaluation; window.openSelf=openSelf;
 
 // initial auth gate
+fbInit(); // set up Firestore connection (if configured) before any login/signup check needs it
 const accts=loadAccounts();
-if(CUR){ document.getElementById('appShell').classList.remove('hidden'); fbInit(); renderCurrent(); }
+if(CUR){ document.getElementById('appShell').classList.remove('hidden'); renderCurrent(); }
 else if(accts.length===0){ showAuth('first'); }
 else { showAuth('login'); }
 /* ---- PWA: register service worker (installable as an app) ----
