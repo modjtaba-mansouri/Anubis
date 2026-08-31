@@ -41,6 +41,33 @@ jobs:
           cp index.html sw.js manifest.webmanifest firebase-config.js capacitor/android/app/src/main/assets/public/
           cp icons/*.png capacitor/android/app/src/main/assets/public/icons/
 
+      - name: Generate Android app icon from source icon
+        working-directory: capacitor
+        run: |
+          pip install --quiet --break-system-packages pillow
+          mkdir -p resources
+          python3 - <<'PY'
+          from PIL import Image
+          Image.open('../icons/icon-512.png').convert('RGBA').save('resources/icon.png')
+          Image.open('../icons/icon-maskable-512.png').convert('RGBA').save('resources/icon-foreground.png')
+          Image.new('RGBA', (512, 512), (5, 6, 7, 255)).save('resources/icon-background.png')
+          PY
+          npx @capacitor/assets generate --android
+          python3 - <<'PY'
+          from PIL import Image, ImageDraw
+          sizes = {'mipmap-ldpi':36,'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
+          src = Image.open('resources/icon.png').convert('RGBA')
+          for folder, px in sizes.items():
+              resized = src.resize((px, px), Image.LANCZOS)
+              resized.save(f'android/app/src/main/res/{folder}/ic_launcher.png')
+              mask = Image.new('L', (px, px), 0)
+              ImageDraw.Draw(mask).ellipse((0, 0, px, px), fill=255)
+              round_icon = Image.new('RGBA', (px, px), (0,0,0,0))
+              round_icon.paste(resized, (0,0), mask)
+              round_icon.save(f'android/app/src/main/res/{folder}/ic_launcher_round.png')
+          print('legacy launcher icons regenerated')
+          PY
+
       - name: Compute version
         id: ver
         run: |
