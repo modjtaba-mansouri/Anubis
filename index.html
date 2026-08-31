@@ -877,6 +877,18 @@ function renderCurrent(){ renderList(); }
 function lockApp(){ if(!CUR)return; document.getElementById('appShell').classList.add('hidden'); showAuth('login'); }
 function logout(){ CUR=null; document.getElementById('appShell').classList.add('hidden'); showAuth('login'); }
 function signOut(){ if(!confirm('Log out of Anubis? You will need your password to sign back in.'))return; logout(); }
+async function backUpAccountToCloud(){
+  if(!CUR){ return; }
+  if(!FB.ready){ toast('Cloud sync is not available right now (offline, or not configured).', true); return; }
+  try{
+    const existing=await fbFetchAccount(CUR.id);
+    if(existing){ fbSetConsent(true); toast('This account is already backed up — you can log into it from any device.'); return; }
+    fbSetConsent(true);
+    await fbSaveAccount(CUR);
+    savePeople(); saveSelf(); // re-push current data now that the account itself is registered
+    toast('Backed up. You can now log into "'+CUR.name+'" from any device with this password.');
+  }catch(e){ toast('Backup failed: '+e.message, true); }
+}
 
 /* Lock-after inactivity */
 function applyLockAfter(){
@@ -1359,7 +1371,7 @@ function renderSettingsSection(which){ const body=document.getElementById('setti
     <div class="field" style="border-top:1px solid var(--border);padding-top:14px"><label class="label">Auto-lock after inactivity</label><div class="row" id="lockAfterRow">${[0,1,5,15,30].map(m=>`<button class="optbtn ${STATE.settings.lockAfter===m?'sel':''}" data-lock="${m}">${m===0?'Never':m+' min'}</button>`).join('')}</div>
       <p class="note">The app will lock itself and ask for your password after this much time. Lock on demand uses the header lock button.</p></div>
     <div class="field" style="border-top:1px solid var(--border);padding-top:14px"><label class="label">Your profile</label><p class="sub" style="font-size:12px;color:var(--text-dim);margin:0 0 8px">Know what kind of human you are — your goods and your bads.</p><div class="row"><button class="btn" onclick="openSelf()">Open your profile →</button></div></div>
-    <div class="field" style="border-top:1px solid var(--border);padding-top:14px"><label class="label">Account</label><p class="sub" style="font-size:12px;color:var(--text-dim);margin:0 0 8px">Signed in as <b>${esc(CUR?CUR.name:'')}</b>.</p><div class="row"><button class="btn ghost" onclick="signOut()">Log out</button></div></div>
+    <div class="field" style="border-top:1px solid var(--border);padding-top:14px"><label class="label">Account</label><p class="sub" style="font-size:12px;color:var(--text-dim);margin:0 0 8px">Signed in as <b>${esc(CUR?CUR.name:'')}</b>.</p><div class="row"><button class="btn ghost" onclick="signOut()">Log out</button><button class="btn ghost" onclick="backUpAccountToCloud()">☁ Back up this account to the cloud</button></div><p class="note" style="margin-top:8px">If this account was created before cloud sync existed, use this once so you can log into it from another device.</p></div>
     <div class="field" style="border-top:1px solid var(--border);padding-top:14px"><label class="label">Data</label><div class="row"><button class="btn ghost" onclick="exportData()">Export backup (JSON)</button><button class="btn ghost" onclick="checkUpdate()">Check for updates</button></div>
       <p class="note">Data is stored on this device only for this account. JSON export is a portable backup you can re-import on another device.</p></div>
     <div class="field" style="border-top:1px solid var(--border);padding-top:14px"><label class="label">Data &amp; privacy</label><p class="sub" style="font-size:12px;color:var(--text-dim);margin:0 0 8px">${fbConsent()?'Cloud sync <b>on</b> — your saved reads &amp; anonymized stats are sent to the developer\u2019s Firebase so you can sync across devices and they can read the ratio of each "kind".':'Cloud sync <b>off</b> — everything stays on this device only.'}</p><div class="row"><button class="btn ghost" onclick="toggleConsent()">${fbConsent()?'Turn off cloud sync':'Turn on cloud sync'}</button><button class="btn danger ghost" onclick="clearAccountData()">Clear all data</button></div></div>`;
