@@ -37,7 +37,7 @@ button,select,input,textarea{font-family:inherit}
 ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px}::-webkit-scrollbar-track{background:transparent}
 
 /* Header */
-header.app-header{width:100%;background:var(--bg-elevated);border-bottom:1px solid var(--border);padding:12px 20px 10px;flex-shrink:0}
+header.app-header{width:100%;background:var(--bg-elevated);border-bottom:1px solid var(--border);padding:calc(12px + env(safe-area-inset-top)) 20px 10px;flex-shrink:0}
 .header-row{display:flex;justify-content:space-between;align-items:flex-start;width:100%;gap:16px;flex-wrap:wrap}
 .cluster{display:flex;align-items:center;gap:8px}
 .cluster.left{flex-direction:column;align-items:flex-start;gap:10px}
@@ -286,6 +286,7 @@ footer.app-footer{flex-shrink:0;text-align:center;padding:16px 10px;font-size:10
     <div class="field hidden" id="a-confirmWrap"><label class="label">Confirm password</label><input type="password" id="a-pw2" autocomplete="off"></div>
     <div class="error" id="a-err"></div>
     <div class="actions"><button class="btn" id="a-submit">Continue</button></div>
+    <div id="a-backWrap" class="hidden" style="text-align:center;margin-top:10px"><a href="#" id="a-backLink" style="color:var(--text-dim);font-size:12px;text-decoration:underline">← Back to accounts</a></div>
   </div>
 </div>
 
@@ -673,7 +674,7 @@ function avatarSVG(pct,gender){ const g=gender==='female'?['#e879f9','#a855f7']:
 
 /* ---------- State ---------- */
 let STATE={ relSort:'close', draft:null, person:null, qIndex:0, selfMode:false, deeper:false, people:[], selfProfile:null, settings:{lockAfter:0}, peopleSort:'recent' };
-let _selAccId=null, _lockAfterTimer=null, _activityTimer=null;
+let _selAccId=null, _lockAfterTimer=null, _activityTimer=null, _authMode='login';
 
 function qOpts(q){ return q.opts || SCALE_LABELS; }
 
@@ -696,22 +697,28 @@ let _toastT; function toast(msg,err){ const t=document.getElementById('toast'); 
    AUTH / ACCOUNTS
    ============================================================ */
 function showAuth(mode){
+  _authMode=mode;
   const ov=document.getElementById('authOverlay'); ov.hidden=false;
   document.getElementById('appShell').classList.add('hidden');
   document.getElementById('authLogo').innerHTML=portalSVG(70);
   const fr=document.getElementById('authFirstRun'), lk=document.getElementById('authLoginPick'), cw=document.getElementById('a-confirmWrap');
+  const backWrap=document.getElementById('a-backWrap');
+  const accts=loadAccounts();
   if(mode==='first'){
     fr.classList.remove('hidden'); lk.classList.add('hidden'); cw.classList.remove('hidden');
     document.getElementById('authTitle').textContent='Create your account';
     document.getElementById('a-pwLabel').textContent='Password';
     document.getElementById('a-submit').textContent='Create & enter';
     document.getElementById('a-err').textContent='';
+    document.getElementById('a-name').value=''; document.getElementById('a-dob').value='';
+    backWrap.classList.toggle('hidden', accts.length===0);
   } else { // login
     fr.classList.add('hidden'); lk.classList.remove('hidden'); cw.classList.add('hidden');
     document.getElementById('authTitle').textContent='Anubis is locked';
     document.getElementById('a-pwLabel').textContent='Enter password';
     document.getElementById('a-submit').textContent='Unlock';
     document.getElementById('a-err').textContent='';
+    backWrap.classList.add('hidden');
     renderAccList();
   }
   document.getElementById('a-pw').value=''; document.getElementById('a-pw2').value='';
@@ -719,15 +726,17 @@ function showAuth(mode){
 function renderAccList(){
   const box=document.getElementById('a-accList'); const accts=loadAccounts();
   if(!_selAccId || !accts.some(a=>a.id===_selAccId)) _selAccId = localStorage.getItem(LS.last) || (accts[0]&&accts[0].id);
-  box.innerHTML=accts.map(a=>`<div class="acc-item ${a.id===_selAccId?'sel':''}" data-acc="${a.id}">${esc(a.name)} · ${esc(a.gender)}${a.age!=null?' · '+a.age:''}</div>`).join('');
-  box.querySelectorAll('.acc-item').forEach(n=>n.addEventListener('click',()=>{ _selAccId=n.dataset.acc; renderAccList(); }));
+  box.innerHTML=accts.map(a=>`<div class="acc-item ${a.id===_selAccId?'sel':''}" data-acc="${a.id}">${esc(a.name)} · ${esc(a.gender)}${a.age!=null?' · '+a.age:''}</div>`).join('')
+    + `<div class="acc-item" id="a-newAccBtn" style="text-align:center;color:var(--accent);font-weight:700">+ Add new account</div>`;
+  box.querySelectorAll('.acc-item[data-acc]').forEach(n=>n.addEventListener('click',()=>{ _selAccId=n.dataset.acc; renderAccList(); }));
+  const nb=document.getElementById('a-newAccBtn'); if(nb) nb.addEventListener('click',()=>showAuth('first'));
 }
 
 async function handleAuthSubmit(){
   const accts=loadAccounts(); const err=document.getElementById('a-err'); err.textContent='';
   const pw=document.getElementById('a-pw').value;
-  if(!accts.length){
-    // first-run: name, gender, dob, password
+  if(_authMode==='first' || !accts.length){
+    // create a new account: name, gender, dob, password
     const name=document.getElementById('a-name').value.trim();
     const gender=document.getElementById('a-gender').value||'male';
     const dob=document.getElementById('a-dob').value;
@@ -741,7 +750,7 @@ async function handleAuthSubmit(){
     let age=null,zodiac=null; if(dob){ age=ageFrom(dob); const z=zodiacFrom(+dob.slice(5,7),+dob.slice(8,10)); zodiac={name:z.n,range:z.s+' – '+z.e}; }
     const cred=await createCred(pw);
     const acc={ id:'u'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), name, gender, dob, age, zodiac, salt:cred.salt, hash:cred.hash, iter:cred.iter, createdAt:new Date().toISOString() };
-    accts.push(acc); saveAccounts(accts); localStorage.setItem(LS.last, acc.id);
+    accts.push(acc); saveAccounts(accts); localStorage.setItem(LS.last, acc.id); _selAccId=acc.id;
     await finishUnlock(acc);
   } else {
     // login
@@ -1356,6 +1365,7 @@ document.getElementById('navSelf').addEventListener('click',openSelf);
 document.getElementById('navCompare').addEventListener('click',renderCompare);
 document.getElementById('navSettings').addEventListener('click',openSettings);
 document.getElementById('a-submit').addEventListener('click',()=>{ handleAuthSubmit().catch(e=>{ document.getElementById('a-err').textContent='Error: '+e.message; }); });
+document.getElementById('a-backLink').addEventListener('click',(e)=>{ e.preventDefault(); showAuth('login'); });
 document.getElementById('a-pw').addEventListener('keydown',e=>{ if(e.key==='Enter')handleAuthSubmit().catch(()=>{}); });
 document.getElementById('a-pw2').addEventListener('keydown',e=>{ if(e.key==='Enter')handleAuthSubmit().catch(()=>{}); });
 
